@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CuffnCode — Parallel Pipeline Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & root ─────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0a0c0f;
+  --bg2:       #111418;
+  --bg3:       #181c22;
+  --border:    #1e2530;
+  --border2:   #2a3340;
+  --teal:      #00e5c8;
+  --teal-dim:  #00b09c;
+  --teal-glow: rgba(0,229,200,0.12);
+  --coral:     #ff5f57;
+  --amber:     #f5a623;
+  --purple:    #a78bfa;
+  --text:      #c8d0dc;
+  --text-dim:  #5a6a7e;
+  --text-bright: #e8edf4;
+  --mono: 'Space Mono', monospace;
+  --sans: 'DM Sans', sans-serif;
+  --r: 6px;
+}
+
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); overflow-x: hidden; }
+
+/* ── Scanline atmosphere ───────────────────────── */
+body::before {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 1000;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+}
+
+/* ── Layout ────────────────────────────────────── */
+.app { display: grid; grid-template-rows: auto 1fr; min-height: 100vh; }
+
+/* ── Header ────────────────────────────────────── */
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 28px; border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+
+.logo { display: flex; align-items: center; gap: 12px; }
+.logo-mark {
+  width: 34px; height: 34px; border-radius: 8px;
+  background: var(--teal); display: flex; align-items: center; justify-content: center;
+  position: relative; overflow: hidden;
+}
+.logo-mark svg { width: 20px; height: 20px; }
+.logo-name { font-family: var(--mono); font-size: 15px; color: var(--text-bright); letter-spacing: 0.05em; }
+.logo-sub  { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+.header-right { display: flex; align-items: center; gap: 20px; }
+
+.status-badge {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+  padding: 5px 12px; border: 1px solid var(--border2); border-radius: 20px;
+}
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text-dim); transition: background .3s;
+}
+.status-dot.running { background: var(--teal); box-shadow: 0 0 8px var(--teal); animation: pulse-dot 1.4s ease-in-out infinite; }
+.status-dot.stopped { background: var(--coral); }
+@keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+.elapsed { font-family: var(--mono); font-size: 13px; color: var(--teal); min-width: 56px; text-align: right; }
+
+/* ── Main grid ─────────────────────────────────── */
+main {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  grid-template-rows: auto 1fr auto;
+  gap: 0;
+  height: calc(100vh - 63px);
+}
+
+/* ── Sidebar ───────────────────────────────────── */
+aside {
+  grid-row: 1 / -1;
+  background: var(--bg2); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 0; overflow-y: auto;
+}
+
+.sidebar-section { padding: 18px 20px; border-bottom: 1px solid var(--border); }
+.sidebar-label { font-size: 9px; font-family: var(--mono); letter-spacing: .14em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 14px; }
+
+/* Thread cards in sidebar */
+.thread-card {
+  background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 12px 14px; margin-bottom: 8px; position: relative; overflow: hidden;
+  transition: border-color .3s;
+}
+.thread-card.active { border-color: var(--teal-dim); }
+.thread-card::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--text-dim); transition: background .3s;
+}
+.thread-card.t1::before { background: var(--teal); }
+.thread-card.t2::before { background: var(--purple); }
+.thread-card.t3::before { background: var(--coral); }
+
+.thread-name { font-family: var(--mono); font-size: 11px; color: var(--text-bright); margin-bottom: 5px; }
+.thread-desc { font-size: 10px; color: var(--text-dim); margin-bottom: 10px; }
+.thread-stat { display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; }
+.thread-stat-key { font-size: 10px; color: var(--text-dim); }
+.thread-stat-val { font-family: var(--mono); font-size: 12px; color: var(--text); }
+.thread-stat-val.hi { color: var(--teal); }
+
+/* Queue meters */
+.queue-row { margin-bottom: 10px; }
+.queue-label { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-bottom: 5px; }
+.queue-bar { height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+.queue-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+.queue-fill.q1 { background: linear-gradient(90deg, var(--teal-dim), var(--teal)); }
+.queue-fill.q2 { background: linear-gradient(90deg, #7c5cbf, var(--purple)); }
+
+/* Controls */
+.ctrl-row { margin-bottom: 14px; }
+.ctrl-label { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-bottom: 6px; }
+.ctrl-label span { font-family: var(--mono); color: var(--text); }
+input[type=range] { width: 100%; accent-color: var(--teal); cursor: pointer; }
+
+.btn {
+  width: 100%; padding: 10px; border-radius: var(--r); border: none;
+  font-family: var(--mono); font-size: 12px; cursor: pointer; transition: all .2s;
+  letter-spacing: .05em;
+}
+.btn-start { background: var(--teal); color: #000; }
+.btn-start:hover { background: #00ffd8; }
+.btn-stop  { background: transparent; color: var(--coral); border: 1px solid var(--coral); margin-top: 8px; }
+.btn-stop:hover  { background: rgba(255,95,87,.1); }
+.btn:disabled { opacity: .35; cursor: not-allowed; }
+
+/* ── Content area ──────────────────────────────── */
+.content { display: flex; flex-direction: column; overflow: hidden; }
+
+/* BP readout row */
+.bp-row {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px;
+  background: var(--border); border-bottom: 1px solid var(--border);
+}
+.bp-card {
+  background: var(--bg2); padding: 20px 28px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.bp-card-label { font-size: 9px; font-family: var(--mono); letter-spacing: .14em; color: var(--text-dim); text-transform: uppercase; }
+.bp-value {
+  font-family: var(--mono); font-size: 42px; font-weight: 700; line-height: 1;
+  color: var(--text-bright); transition: color .4s;
+}
+.bp-value.sbp { color: var(--coral); }
+.bp-value.dbp { color: var(--teal); }
+.bp-value.map { color: var(--amber); }
+.bp-unit { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.bp-sublabel { font-size: 10px; color: var(--text-dim); margin-top: 6px; }
+
+/* Chart area */
+.chart-area {
+  flex: 1; display: grid; grid-template-rows: 1fr 1fr;
+  gap: 0; overflow: hidden;
+}
+.chart-panel {
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  position: relative; padding: 12px 16px 8px;
+  display: flex; flex-direction: column;
+}
+.chart-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px; flex-shrink: 0;
+}
+.chart-title { font-size: 10px; font-family: var(--mono); letter-spacing: .1em; color: var(--text-dim); text-transform: uppercase; }
+.chart-tag {
+  font-size: 9px; font-family: var(--mono); padding: 2px 8px;
+  border-radius: 10px; border: 1px solid;
+}
+.tag-raw      { color: var(--purple); border-color: var(--purple); background: rgba(167,139,250,.08); }
+.tag-filtered { color: var(--teal);   border-color: var(--teal-dim); background: var(--teal-glow); }
+
+canvas { flex: 1; width: 100% !important; }
+
+/* ── Log panel ─────────────────────────────────── */
+.log-panel {
+  height: 110px; background: var(--bg2); border-top: 1px solid var(--border);
+  padding: 10px 20px; overflow-y: auto; flex-shrink: 0;
+}
+.log-entry {
+  font-family: var(--mono); font-size: 10px; color: var(--text-dim);
+  padding: 2px 0; white-space: nowrap;
+}
+.log-entry .ts { color: var(--text-dim); margin-right: 8px; }
+.log-entry .msg-info  { color: var(--teal); }
+.log-entry .msg-warn  { color: var(--amber); }
+.log-entry .msg-bp    { color: var(--text-bright); }
+.log-entry .msg-err   { color: var(--coral); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* ── Throughput bar ────────────────────────────── */
+.thru-row {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+  background: var(--border); border-top: 1px solid var(--border);
+}
+.thru-card { background: var(--bg2); padding: 10px 16px; display: flex; align-items: center; gap: 14px; }
+.thru-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+.thru-icon.t1 { background: rgba(0,229,200,.1); }
+.thru-icon.t2 { background: rgba(167,139,250,.1); }
+.thru-icon.t3 { background: rgba(255,95,87,.1); }
+.thru-info { flex: 1; }
+.thru-name { font-size: 10px; color: var(--text-dim); margin-bottom: 2px; }
+.thru-rate { font-family: var(--mono); font-size: 14px; color: var(--text-bright); }
+.thru-mini-bar { height: 3px; background: var(--bg3); border-radius: 2px; margin-top: 4px; overflow: hidden; }
+.thru-mini-fill { height: 100%; border-radius: 2px; width: 0%; transition: width .5s; }
+.fill-t1 { background: var(--teal); }
+.fill-t2 { background: var(--purple); }
+.fill-t3 { background: var(--coral); }
+
+/* ── Inline style replacements (aksesibilitas) ─────── */
+.mode-badge-init   { border-color: #2a3340; }
+.mode-text-init    { font-size: 10px; }
+.info-section      { margin-top: auto; }
+.info-body         { font-size: 10px; color: var(--text-dim); line-height: 1.7; }
+.info-bold         { color: var(--text); }
+.info-code         { font-size: 9px; color: var(--teal); }
+.bar-init          { width: 0%; }
+
+/* ── CPU / RAM ─────────────────────────────────── */
+.sysmon-row {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  background: var(--border); border-top: 1px solid var(--border);
+}
+.sysmon-card { background: var(--bg2); padding: 8px 16px; }
+.sysmon-label { font-size: 9px; font-family: var(--mono); letter-spacing:.1em; color: var(--text-dim); text-transform:uppercase; margin-bottom: 4px; }
+.sysmon-val   { font-family: var(--mono); font-size: 18px; color: var(--text-bright); }
+.sysmon-bar   { height: 3px; background: var(--bg3); border-radius: 2px; margin-top: 5px; overflow: hidden; }
+.sysmon-fill  { height: 100%; border-radius: 2px; transition: width .5s; }
+.sysmon-fill.cpu { background: var(--amber); }
+.sysmon-fill.ram { background: var(--purple); }
+
+/* ── Benchmark panel (sidebar) ─────────────────── */
+.bench-row { display: flex; justify-content: space-between; align-items: baseline; margin: 5px 0; }
+.bench-key { font-size: 10px; color: var(--text-dim); }
+.bench-val { font-family: var(--mono); font-size: 12px; color: var(--text); }
+.bench-val.hi { color: var(--teal); font-size: 14px; }
+.bench-val.warn { color: var(--amber); }
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ── Header ── -->
+<header>
+  <div class="logo">
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.5" stroke-linecap="round">
+        <path d="M2 12h3l3-8 4 16 3-10 2 2h5"/>
+      </svg>
+    </div>
+    <div>
+      <div class="logo-name">CuffnCode</div>
+      <div class="logo-sub">Parallel BP Signal Processing Pipeline</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-badge mode-badge-init" id="mode-badge">
+      <span id="mode-text" class="mode-text-init"></span>
+    </div>
+    <div class="status-badge">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">IDLE</span>
+    </div>
+    <div class="elapsed" id="elapsed-display">0.0s</div>
+  </div>
+</header>
+
+<!-- ── Main ── -->
+<main>
+
+  <!-- Sidebar -->
+  <aside>
+
+    <!-- Thread status -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Thread status</div>
+
+      <div class="thread-card t1" id="tc1">
+        <div class="thread-name">T1 — Signal generator</div>
+        <div class="thread-desc">Oscillometric cuff model + 50 Hz hum + Gaussian noise</div>
+        <div class="thread-stat"><span class="thread-stat-key">Produced</span><span class="thread-stat-val hi" id="t1-count">0</span></div>
+        <div class="thread-stat"><span class="thread-stat-key">Rate</span><span class="thread-stat-val" id="t1-rate">0 samp/s</span></div>
+      </div>
+
+      <div class="thread-card t2" id="tc2">
+        <div class="thread-name">T2 — Signal filter</div>
+        <div class="thread-desc">IIR notch 50 Hz → moving-average smoothing</div>
+        <div class="thread-stat"><span class="thread-stat-key">Filtered</span><span class="thread-stat-val hi" id="t2-count">0</span></div>
+        <div class="thread-stat"><span class="thread-stat-key">Rate</span><span class="thread-stat-val" id="t2-rate">0 samp/s</span></div>
+      </div>
+
+      <div class="thread-card t3" id="tc3">
+        <div class="thread-name">T3 — BP detector</div>
+        <div class="thread-desc">Oscillometric envelope → systolic / diastolic estimation</div>
+        <div class="thread-stat"><span class="thread-stat-key">Readings</span><span class="thread-stat-val hi" id="t3-count">0</span></div>
+        <div class="thread-stat"><span class="thread-stat-key">Rate</span><span class="thread-stat-val" id="t3-rate">0 /s</span></div>
+      </div>
+    </div>
+
+    <!-- Queues -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Inter-thread queues</div>
+      <div class="queue-row">
+        <div class="queue-label"><span>raw_queue (T1→T2)</span><span id="q1-size">0 / 200</span></div>
+        <div class="queue-bar"><div class="queue-fill q1 bar-init" id="q1-bar"></div></div>
+      </div>
+      <div class="queue-row">
+        <div class="queue-label"><span>filtered_queue (T2→T3)</span><span id="q2-size">0 / 200</span></div>
+        <div class="queue-bar"><div class="queue-fill q2 bar-init" id="q2-bar"></div></div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Simulation parameters</div>
+      <div class="ctrl-row">
+        <div class="ctrl-label">Target SBP <span id="sbp-val">120</span> mmHg</div>
+        <input type="range" id="sbp-slider" min="90" max="180" value="120"
+               aria-label="Target Systolic Blood Pressure in mmHg"
+               title="Target SBP (90–180 mmHg)"
+               oninput="document.getElementById('sbp-val').textContent=this.value">
+      </div>
+      <div class="ctrl-row">
+        <div class="ctrl-label">Target DBP <span id="dbp-val">80</span> mmHg</div>
+        <input type="range" id="dbp-slider" min="50" max="110" value="80"
+               aria-label="Target Diastolic Blood Pressure in mmHg"
+               title="Target DBP (50–110 mmHg)"
+               oninput="document.getElementById('dbp-val').textContent=this.value">
+      </div>
+      <div class="ctrl-row">
+        <div class="ctrl-label">Duration <span id="dur-val">30</span> s</div>
+        <input type="range" id="dur-slider" min="10" max="60" value="30"
+               aria-label="Pipeline duration in seconds"
+               title="Duration (10–60 s)"
+               oninput="document.getElementById('dur-val').textContent=this.value">
+      </div>
+      <button class="btn btn-start" id="btn-start" onclick="startPipeline()">▶ RUN PIPELINE</button>
+      <button class="btn btn-stop"  id="btn-stop"  onclick="stopPipeline()" disabled>■ STOP</button>
+    </div>
+
+    <!-- Info -->
+    <div class="sidebar-section info-section">
+      <div class="sidebar-label">Parallelism model</div>
+      <div class="info-body">
+        <b class="info-bold">Pattern:</b> Producer–Consumer<br>
+        <b class="info-bold">Sync:</b> Python <code class="info-code">queue.Queue</code> (thread-safe)<br>
+        <b class="info-bold">Threads:</b> 3 worker + 1 exporter<br>
+        <b class="info-bold">IFB 206</b> — Komputasi Paralel
+      </div>
+    </div>
+
+    <!-- Benchmark -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Benchmark Results</div>
+      <div class="bench-row"><span class="bench-key">Sequential</span><span class="bench-val" id="bench-seq">—</span></div>
+      <div class="bench-row"><span class="bench-key">Parallel</span><span class="bench-val" id="bench-par">—</span></div>
+      <div class="bench-row"><span class="bench-key">Speedup</span><span class="bench-val hi" id="bench-speedup">—</span></div>
+      <div class="bench-row"><span class="bench-key">Efficiency</span><span class="bench-val warn" id="bench-eff">—</span></div>
+      <div class="bench-row"><span class="bench-key">Workers</span><span class="bench-val">3 threads</span></div>
+    </div>
+  </aside>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- BP big numbers -->
+    <div class="bp-row">
+      <div class="bp-card">
+        <div class="bp-card-label">Systolic</div>
+        <div class="bp-value sbp" id="sbp-display">—</div>
+        <div class="bp-unit">mmHg</div>
+        <div class="bp-sublabel">Peak cuff oscillation onset</div>
+      </div>
+      <div class="bp-card">
+        <div class="bp-card-label">Diastolic</div>
+        <div class="bp-value dbp" id="dbp-display">—</div>
+        <div class="bp-unit">mmHg</div>
+        <div class="bp-sublabel">Oscillation trailing threshold</div>
+      </div>
+      <div class="bp-card">
+        <div class="bp-card-label">MAP</div>
+        <div class="bp-value map" id="map-display">—</div>
+        <div class="bp-unit">mmHg</div>
+        <div class="bp-sublabel">DBP + (SBP − DBP) / 3</div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="chart-area">
+      <div class="chart-panel">
+        <div class="chart-panel-header">
+          <span class="chart-title">Raw signal (T1 output)</span>
+          <span class="chart-tag tag-raw">NOISY · 50 Hz HUM</span>
+        </div>
+        <canvas id="chart-raw"></canvas>
+      </div>
+      <div class="chart-panel">
+        <div class="chart-panel-header">
+          <span class="chart-title">Filtered signal (T2 output)</span>
+          <span class="chart-tag tag-filtered">NOTCH + SMOOTHED</span>
+        </div>
+        <canvas id="chart-filtered"></canvas>
+      </div>
+    </div>
+
+    <!-- Throughput bar -->
+    <div class="thru-row">
+      <div class="thru-card">
+        <div class="thru-icon t1">📡</div>
+        <div class="thru-info">
+          <div class="thru-name">T1 Generator throughput</div>
+          <div class="thru-rate" id="thru-t1">0 samp/s</div>
+          <div class="thru-mini-bar"><div class="thru-mini-fill fill-t1" id="bar-t1"></div></div>
+        </div>
+      </div>
+      <div class="thru-card">
+        <div class="thru-icon t2">🔧</div>
+        <div class="thru-info">
+          <div class="thru-name">T2 Filter throughput</div>
+          <div class="thru-rate" id="thru-t2">0 samp/s</div>
+          <div class="thru-mini-bar"><div class="thru-mini-fill fill-t2" id="bar-t2"></div></div>
+        </div>
+      </div>
+      <div class="thru-card">
+        <div class="thru-icon t3">🩺</div>
+        <div class="thru-info">
+          <div class="thru-name">T3 Detector readings</div>
+          <div class="thru-rate" id="thru-t3">0 /s</div>
+          <div class="thru-mini-bar"><div class="thru-mini-fill fill-t3" id="bar-t3"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CPU / RAM Monitor -->
+    <div class="sysmon-row">
+      <div class="sysmon-card">
+        <div class="sysmon-label">CPU Usage</div>
+        <div class="sysmon-val" id="cpu-val">—</div>
+        <div class="sysmon-bar"><div class="sysmon-fill cpu bar-init" id="cpu-bar"></div></div>
+      </div>
+      <div class="sysmon-card">
+        <div class="sysmon-label">RAM Usage</div>
+        <div class="sysmon-val" id="ram-val">—</div>
+        <div class="sysmon-bar"><div class="sysmon-fill ram bar-init" id="ram-bar"></div></div>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-panel" id="log-panel">
+      <div class="log-entry"><span class="ts">[00.0]</span><span class="msg-info">System ready. Configure parameters and press RUN PIPELINE.</span></div>
+    </div>
+
+  </div><!-- .content -->
+</main>
+</div><!-- .app -->
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════
+// MODE DETECTION
+// Jika dijalankan via HTTP server (python main.py), dashboard akan polling
+// output/state.json yang ditulis pipeline Python secara real-time.
+// Jika dibuka langsung sebagai file (file://), fallback ke simulasi browser.
+// ══════════════════════════════════════════════════════════════════════════
+const IS_SERVER_MODE = window.location.protocol === 'http:' || window.location.protocol === 'https:';
+const STATE_URL = 'output/state.json';
+let pollInterval = null;
+let pipelineStopped = false; // guard tunggal untuk stop loop
+
+// ── Signal simulation (runs in browser, mirrors Python logic) ──────────────
+let running = false;
+let simTime = 0;
+let startTime = null;
+let animFrame = null;
+
+// State mirrors pipeline.py's PipelineState
+let state = {
+  t1_count: 0, t2_count: 0, t3_count: 0,
+  t1_rate: 0, t2_rate: 0, t3_rate: 0,
+  raw_q_size: 0, filtered_q_size: 0,
+  systolic: null, diastolic: null, map_val: null,
+  elapsed: 0,
+  cpu_usage: 0, memory_usage: 0,
+  speedup: 0, efficiency: 0,
+  benchmark_seq: 0, benchmark_par: 0,
+};
+
+// Circular buffers for charts
+const BUF = 300;
+let rawBuf = new Float32Array(BUF);
+let filtBuf = new Float32Array(BUF);
+let bufIdx = 0;
+
+// Notch filter state (mirrors Python NotchFilter)
+const notch = (() => {
+  const f0 = 50, fs = 200, bw = 4;
+  const w0 = 2*Math.PI*f0/fs;
+  const r  = 1 - (2*Math.PI*bw/fs)/2;
+  return {
+    r, cos: Math.cos(w0),
+    b0:1, b1:-2*Math.cos(w0), b2:1,
+    a1:-2*r*Math.cos(w0), a2:r*r,
+    x1:0, x2:0, y1:0, y2:0,
+    process(x) {
+      const y = this.b0*x + this.b1*this.x1 + this.b2*this.x2
+               - this.a1*this.y1 - this.a2*this.y2;
+      this.x2=this.x1; this.x1=x;
+      this.y2=this.y1; this.y1=y;
+      return y;
+    }
+  };
+})();
+
+// Moving average
+let maBuf = [], MA_WIN = 15;
+function movingAvg(v) {
+  maBuf.push(v); if (maBuf.length > MA_WIN) maBuf.shift();
+  return maBuf.reduce((a,b)=>a+b,0)/maBuf.length;
+}
+
+// BP detector state
+let detectorBuf = [], detReadings = 0;
+const ANALYSIS_WIN = 400;
+
+function oscillometricSignal(t, sbp, dbp) {
+  const hrHz = 1.2;
+  const mapP = dbp + (sbp - dbp) / 3;
+  const sigma = (sbp - dbp) / 4;
+  const cuffNorm = Math.max(0, 1 - t / 30);
+  const cuffMmhg = cuffNorm * sbp;
+  const env = Math.exp(-Math.pow(cuffMmhg - mapP, 2) / (2*sigma*sigma));
+  const osc  = env * 0.5 * Math.sin(2*Math.PI*hrHz*t);
+  const hum  = 0.08 * Math.sin(2*Math.PI*50*t);
+  const noise = (Math.random()-0.5)*0.08;
+  return osc + hum + noise;
+}
+
+function detectBP(sbpTarget, dbpTarget) {
+  if (detectorBuf.length < ANALYSIS_WIN) return;
+  const buf = detectorBuf.slice(0, ANALYSIS_WIN);
+  const peaks = [];
+  for (let i=1; i<buf.length-1; i++) {
+    if (buf[i]>buf[i-1] && buf[i]>buf[i+1] && buf[i]>0.02)
+      peaks.push({i, v: buf[i]});
+  }
+  if (peaks.length < 3) { detectorBuf = detectorBuf.slice(ANALYSIS_WIN/2); return; }
+  const maxAmp = Math.max(...peaks.map(p=>p.v));
+  const sbpPk = peaks.find(p => p.v >= 0.50*maxAmp);
+  const dbpPk = [...peaks].reverse().find(p => p.v >= 0.80*maxAmp);
+  if (sbpPk && dbpPk) {
+    const sbpNorm = 1 - sbpPk.i/buf.length;
+    const dbpNorm = 1 - dbpPk.i/buf.length;
+    let sbp = 80 + sbpNorm*80, dbp = 50 + dbpNorm*50;
+    sbp = Math.max(90, Math.min(180, sbp));
+    dbp = Math.max(50, Math.min(110, dbp));
+    const map = dbp + (sbp-dbp)/3;
+    state.systolic  = sbp.toFixed(1);
+    state.diastolic = dbp.toFixed(1);
+    state.map_val   = map.toFixed(1);
+    state.t3_count  = ++detReadings;
+    addLog(`BP reading #${detReadings}: ${sbp.toFixed(0)}/${dbp.toFixed(0)} mmHg  MAP=${map.toFixed(0)}`, 'bp');
+  }
+  detectorBuf = detectorBuf.slice(ANALYSIS_WIN/2);
+}
+
+// ── Canvas setup ─────────────────────────────────────────────────────────────
+function setupCanvas(id) {
+  const canvas = document.getElementById(id);
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width  = rect.width  * dpr;
+  canvas.height = (rect.height - 48) * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  canvas.style.width  = rect.width  + 'px';
+  canvas.style.height = (rect.height - 48) + 'px';
+  return { canvas, ctx, w: rect.width, h: rect.height - 48 };
+}
+
+let rawChart = null, filtChart = null;
+
+function drawWaveform(ctx, w, h, buf, color, glowColor) {
+  ctx.clearRect(0, 0, w, h);
+  // Grid lines
+  ctx.strokeStyle = 'rgba(30,37,48,0.8)';
+  ctx.lineWidth = 1;
+  for (let y = 0; y < h; y += h/4) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+  for (let x = 0; x < w; x += w/6) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+  // Zero line
+  ctx.strokeStyle = 'rgba(90,106,126,0.4)';
+  ctx.beginPath(); ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
+
+  // Signal
+  const mid = h/2, scale = h * 0.38;
+  const n = buf.length;
+  const dx = w / (n-1);
+
+  // Glow pass
+  ctx.shadowBlur = 12; ctx.shadowColor = glowColor;
+  ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let i=0; i<n; i++) {
+    const vi = (bufIdx + i) % n;
+    const x = i * dx, y = mid - buf[vi]*scale;
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  }
+  ctx.stroke(); ctx.shadowBlur = 0;
+
+  // Sharp pass
+  ctx.strokeStyle = color; ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.6; ctx.beginPath();
+  for (let i=0; i<n; i++) {
+    const vi = (bufIdx + i) % n;
+    const x = i * dx, y = mid - buf[vi]*scale;
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  }
+  ctx.stroke(); ctx.globalAlpha = 1;
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+const FS = 200; // Hz
+const FS_INTERVAL = 1000/FS;
+let lastSampleTime = 0;
+let t1c=0, t2c=0;
+let tRef = 0;
+
+function simLoop(ts) {
+  if (!running) return;
+  const elapsed = (ts - tRef) / 1000;
+  const duration = +document.getElementById('dur-slider').value;
+  if (elapsed > duration) { stopPipeline(false); return; }
+
+  state.elapsed = elapsed.toFixed(1);
+
+  // Sample at ~200 Hz
+  if (ts - lastSampleTime >= FS_INTERVAL) {
+    lastSampleTime = ts;
+    const sbp = +document.getElementById('sbp-slider').value;
+    const dbp = +document.getElementById('dbp-slider').value;
+    simTime += 1/FS;
+
+    // T1
+    const raw = oscillometricSignal(simTime, sbp, dbp);
+    rawBuf[bufIdx % BUF] = raw;
+    state.t1_count = ++t1c;
+    state.raw_q_size = Math.min(200, Math.floor(Math.random()*15));
+    state.t1_rate = (t1c / elapsed).toFixed(0);
+
+    // T2
+    const notched  = notch.process(raw);
+    const smoothed = movingAvg(notched);
+    filtBuf[bufIdx % BUF] = smoothed;
+    bufIdx++;
+    state.t2_count = ++t2c;
+    state.filtered_q_size = Math.min(200, Math.floor(Math.random()*8));
+    state.t2_rate = (t2c / elapsed).toFixed(0);
+
+    // T3
+    detectorBuf.push(smoothed);
+    if (detectorBuf.length >= ANALYSIS_WIN) detectBP(sbp, dbp);
+    state.t3_rate = (detReadings / elapsed).toFixed(2);
+  }
+
+  updateUI();
+  if (elapsed % 5 < 0.016) {
+    addLog(`T=${elapsed.toFixed(0)}s | Produced:${t1c} | Filtered:${t2c} | Readings:${detReadings}`, 'info');
+  }
+
+  animFrame = requestAnimationFrame(simLoop);
+}
+
+// ── UI update ────────────────────────────────────────────────────────────────
+function updateUI() {
+  // Status
+  document.getElementById('elapsed-display').textContent = state.elapsed + 's';
+
+  // Thread counts
+  document.getElementById('t1-count').textContent = state.t1_count.toLocaleString();
+  document.getElementById('t2-count').textContent = state.t2_count.toLocaleString();
+  document.getElementById('t3-count').textContent = state.t3_count;
+  document.getElementById('t1-rate').textContent  = state.t1_rate + ' samp/s';
+  document.getElementById('t2-rate').textContent  = state.t2_rate + ' samp/s';
+  document.getElementById('t3-rate').textContent  = state.t3_rate + ' /s';
+
+  // Queues
+  const q1p = (state.raw_q_size/200*100).toFixed(0);
+  const q2p = (state.filtered_q_size/200*100).toFixed(0);
+  document.getElementById('q1-size').textContent = `${state.raw_q_size} / 200`;
+  document.getElementById('q2-size').textContent = `${state.filtered_q_size} / 200`;
+  document.getElementById('q1-bar').style.width = q1p + '%';
+  document.getElementById('q2-bar').style.width = q2p + '%';
+
+  // BP values
+  document.getElementById('sbp-display').textContent = state.systolic  ?? '—';
+  document.getElementById('dbp-display').textContent = state.diastolic ?? '—';
+  document.getElementById('map-display').textContent = state.map_val   ?? '—';
+
+  // Throughput bars
+  const maxRate = 220;
+  const t1p = Math.min(100, state.t1_rate / maxRate * 100);
+  const t2p = Math.min(100, state.t2_rate / maxRate * 100);
+  const t3p = Math.min(100, state.t3_rate * 200);
+  document.getElementById('thru-t1').textContent = state.t1_rate + ' samp/s';
+  document.getElementById('thru-t2').textContent = state.t2_rate + ' samp/s';
+  document.getElementById('thru-t3').textContent = state.t3_rate + ' /s';
+  document.getElementById('bar-t1').style.width = t1p + '%';
+  document.getElementById('bar-t2').style.width = t2p + '%';
+  document.getElementById('bar-t3').style.width = t3p + '%';
+
+  // CPU & RAM
+  if (state.cpu_usage > 0 || state.memory_usage > 0) {
+    document.getElementById('cpu-val').textContent = state.cpu_usage.toFixed(1) + '%';
+    document.getElementById('ram-val').textContent = state.memory_usage.toFixed(1) + '%';
+    document.getElementById('cpu-bar').style.width = Math.min(100, state.cpu_usage) + '%';
+    document.getElementById('ram-bar').style.width = Math.min(100, state.memory_usage) + '%';
+  }
+
+  // Benchmark
+  if (state.benchmark_seq > 0) {
+    document.getElementById('bench-seq').textContent = state.benchmark_seq.toFixed(4) + ' s';
+    document.getElementById('bench-par').textContent = state.benchmark_par.toFixed(4) + ' s';
+    document.getElementById('bench-speedup').textContent = state.speedup.toFixed(2) + 'x';
+    document.getElementById('bench-eff').textContent = state.efficiency.toFixed(2) + '%';
+  }
+
+  // Draw charts every frame
+  if (rawChart)  drawWaveform(rawChart.ctx,  rawChart.w,  rawChart.h,  rawBuf,  '#a78bfa', 'rgba(167,139,250,0.4)');
+  if (filtChart) drawWaveform(filtChart.ctx, filtChart.w, filtChart.h, filtBuf, '#00e5c8', 'rgba(0,229,200,0.4)');
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SERVER MODE — polling state.json yang ditulis pipeline Python
+// ══════════════════════════════════════════════════════════════════════════
+function startServerPolling() {
+  let lastT3 = 0;
+  let seenRunning = false; // harus lihat running=true dulu sebelum boleh stop
+  pipelineStopped = false;
+  rawChart  = setupCanvas('chart-raw');
+  filtChart = setupCanvas('chart-filtered');
+
+  pollInterval = setInterval(async () => {
+    if (pipelineStopped) return;
+
+    let data;
+    try {
+      const res = await fetch(STATE_URL + '?t=' + Date.now());
+      data = await res.json();
+    } catch(e) {
+      return;
+    }
+
+    if (pipelineStopped) return;
+
+    // Sync state
+    state.t1_count        = data.t1_count        || 0;
+    state.t2_count        = data.t2_count        || 0;
+    state.t3_count        = data.t3_count        || 0;
+    state.t1_rate         = data.t1_rate         || 0;
+    state.t2_rate         = data.t2_rate         || 0;
+    state.t3_rate         = data.t3_rate         || 0;
+    state.raw_q_size      = data.raw_q_size      || 0;
+    state.filtered_q_size = data.filtered_q_size || 0;
+    state.systolic        = data.systolic;
+    state.diastolic       = data.diastolic;
+    state.map_val         = data.map_val;
+    state.elapsed         = data.elapsed         || 0;
+    state.cpu_usage       = data.cpu_usage       || 0;
+    state.memory_usage    = data.memory_usage    || 0;
+    state.speedup         = data.speedup         || 0;
+    state.efficiency      = data.efficiency      || 0;
+    state.benchmark_seq   = data.benchmark_seq   || 0;
+    state.benchmark_par   = data.benchmark_par   || 0;
+
+    // Catat bahwa pipeline pernah aktif
+    if (data.running) seenRunning = true;
+
+    // Log BP reading baru
+    if (data.t3_count > lastT3 && data.systolic) {
+      lastT3 = data.t3_count;
+      addLog(`BP reading #${data.t3_count}: ${data.systolic}/${data.diastolic} mmHg  MAP=${data.map_val}`, 'bp');
+    }
+
+    // Waveform dari Python / fallback simulasi
+    const rawSamples  = data.raw_samples;
+    const filtSamples = data.filtered_samples;
+    if (rawSamples && rawSamples.length > 0) {
+      const chunk  = rawSamples.slice(-50);
+      const fchunk = (filtSamples && filtSamples.length > 0) ? filtSamples.slice(-50) : chunk;
+      for (let i = 0; i < chunk.length; i++) {
+        rawBuf[bufIdx % BUF]  = chunk[i];
+        filtBuf[bufIdx % BUF] = fchunk[i] !== undefined ? fchunk[i] : chunk[i];
+        bufIdx++;
+      }
+    } else {
+      const sbp = +document.getElementById('sbp-slider').value;
+      const dbp = +document.getElementById('dbp-slider').value;
+      simTime += 0.25;
+      for (let i = 0; i < 50; i++) {
+        const t = simTime - (50-i)/200;
+        rawBuf[bufIdx % BUF]  = oscillometricSignal(t, sbp, dbp);
+        filtBuf[bufIdx % BUF] = movingAvg(notch.process(rawBuf[(bufIdx-1+BUF)%BUF]));
+        bufIdx++;
+      }
+    }
+
+    // ── Stop hanya jika sudah pernah running=true, lalu jadi false ──────
+    if (seenRunning && !data.running && data.elapsed > 0) {
+      stopPipeline(true);
+      return;
+    }
+
+    updateUI();
+  }, 250);
+}
+
+function stopServerPolling() {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+}
+
+// ── Controls ─────────────────────────────────────────────────────────────────
+function startPipeline() {
+  running = true; pipelineStopped = false;
+  simTime = 0; bufIdx = 0; t1c = 0; t2c = 0; detReadings = 0;
+  rawBuf.fill(0); filtBuf.fill(0); detectorBuf = []; maBuf = [];
+  notch.x1=notch.x2=notch.y1=notch.y2=0;
+  state = { t1_count:0, t2_count:0, t3_count:0, t1_rate:0, t2_rate:0, t3_rate:0,
+            raw_q_size:0, filtered_q_size:0, systolic:null, diastolic:null, map_val:null,
+            elapsed:0, cpu_usage:0, memory_usage:0,
+            speedup:0, efficiency:0, benchmark_seq:0, benchmark_par:0 };
+
+  document.getElementById('status-dot').className  = 'status-dot running';
+  document.getElementById('status-text').textContent = IS_SERVER_MODE ? 'LIVE · PYTHON' : 'RUNNING';
+  document.getElementById('btn-start').disabled = true;
+  document.getElementById('btn-stop').disabled  = false;
+  document.getElementById('sbp-display').textContent = '—';
+  document.getElementById('dbp-display').textContent = '—';
+  document.getElementById('map-display').textContent = '—';
+
+  rawChart  = setupCanvas('chart-raw');
+  filtChart = setupCanvas('chart-filtered');
+
+  if (IS_SERVER_MODE) {
+    // ── Mode Live: baca dari state.json pipeline Python ──
+    addLog('Mode: LIVE — membaca data dari pipeline Python', 'info');
+    addLog('Pastikan pipeline sudah berjalan (python main.py)', 'warn');
+    startServerPolling();
+  } else {
+    // ── Mode Simulasi: jalankan simulasi di browser ──
+    addLog('Mode: SIMULASI BROWSER (buka via HTTP server untuk mode live)', 'warn');
+    addLog(`Pipeline started — SBP target=${document.getElementById('sbp-slider').value} DBP target=${document.getElementById('dbp-slider').value} mmHg`, 'info');
+    addLog('T1 Signal generator → running', 'info');
+    addLog('T2 Signal filter     → running', 'info');
+    addLog('T3 BP detector       → running', 'info');
+    tRef = performance.now();
+    animFrame = requestAnimationFrame(simLoop);
+  }
+}
+
+function stopPipeline(fromServer=false) {
+  if (pipelineStopped && !running) return; // sudah stop, jangan re-log
+  pipelineStopped = true; // set PERTAMA — memblokir semua tick async yang masih pending
+  running = false;
+  stopServerPolling();
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+  document.getElementById('status-dot').className   = 'status-dot stopped';
+  document.getElementById('status-text').textContent = 'STOPPED';
+  document.getElementById('btn-start').disabled = false;
+  document.getElementById('btn-stop').disabled  = true;
+  const msg = fromServer
+    ? `Pipeline Python selesai — T=${state.elapsed}s | BP: ${state.systolic ?? '—'}/${state.diastolic ?? '—'} mmHg`
+    : `Pipeline stopped at T=${state.elapsed}s | Final BP: ${state.systolic ?? '—'}/${state.diastolic ?? '—'} mmHg`;
+  addLog(msg, 'warn');
+}
+
+// ── Log ───────────────────────────────────────────────────────────────────────
+function addLog(msg, type='info') {
+  const panel = document.getElementById('log-panel');
+  const e = document.createElement('div');
+  e.className = 'log-entry';
+  const t = parseFloat(state.elapsed || 0).toFixed(1).padStart(5,'0');
+  e.innerHTML = `<span class="ts">[${t}]</span><span class="msg-${type}">${msg}</span>`;
+  panel.appendChild(e);
+  panel.scrollTop = panel.scrollHeight;
+  if (panel.children.length > 80) panel.children[0].remove();
+}
+
+// ── Resize ────────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  if (running) { rawChart = setupCanvas('chart-raw'); filtChart = setupCanvas('chart-filtered'); }
+});
+
+// ── Mode badge init ───────────────────────────────────────────────────────────
+(function() {
+  const badge = document.getElementById('mode-badge');
+  const text  = document.getElementById('mode-text');
+  if (IS_SERVER_MODE) {
+    text.textContent  = '🐍 LIVE MODE';
+    text.style.color  = 'var(--teal)';
+    badge.style.borderColor = 'var(--teal-dim)';
+  } else {
+    text.textContent  = '🌐 SIM MODE';
+    text.style.color  = 'var(--amber)';
+    badge.style.borderColor = 'var(--amber)';
+  }
+})();
+</script>
+</body>
+</html>
